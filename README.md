@@ -6,7 +6,7 @@ A calm, near-invisible overlay that shows what your AI agents are doing — work
 
 This is a product I designed and directed as a senior product designer. The interface, motion, and interaction design are mine. The code was written with AI coding agents (Cursor and others) under that direction. It is an AI-built prototype, not a hand-written production codebase.
 
-**Live demo:** _Coming soon — will be added here after deploy, expected at `https://agent-presence.vercel.app/`_
+**Live demo:** [agent-presence-eosin.vercel.app](https://agent-presence-eosin.vercel.app/)
 
 The link to try it live is the web overlay at `/` (this page). Style Lab is at `/lab/`. `/desktop/` is the transparent shell used by the native Windows app; in a plain browser it shows a preview on a dark backdrop instead of crashing or rendering a blank transparent page.
 
