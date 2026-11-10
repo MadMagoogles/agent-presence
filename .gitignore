@@ -1,0 +1,46 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+src-tauri/target/
+src-tauri/gen/
+
+# Environment and backups
+.env
+.env.*
+*.bak
+*.bak-*
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Working screenshots, private desktop recordings, and capture leftovers.
+# Public stills used in the README live in docs/.
+screens/
+
+# Internal recording / delivery notes and local capture helpers
+RECORDING.md
+DESKTOP-V2-DELIVERY.md
+DEPLOY-PLAN.md
+screens-cleanup-*.json
+showcase-temp.cjs
+showcase-v2-temp.cjs
+Record-Desktop*.ps1
+desktop-v2-*.zip
+desktop-v2-*.json
+desktop-v2-cleanup-reports.zip
+desktop-v2-delivery.zip
+recording-*.zip
+recording-*.json
+desktop-native-*.png
+
+# Local Vercel / editor leftovers
+.vercel/
+.idea/
+.vscode/
+*.log
+
+# TypeScript incremental build cache
+*.tsbuildinfo
