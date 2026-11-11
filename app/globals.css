@@ -46,3 +46,42 @@ body { background: var(--color-bg-secondary); color: var(--color-text-primary); 
   8.94%, 15.18%, 84.82%, 91.06% { filter: saturate(1.6) blur(2.8px); animation-timing-function: ease-in-out; }
 }
 @media (prefers-reduced-motion: reduce) { [style*="lab-"] { animation: none !important; } }
+
+/* Demo site backgrounds. Desktop URLs live in a min-width query so phones
+   never download the full-size abstract or campfire files. */
+@media (min-width: 768px) {
+  [data-demo-bg="abstract"] {
+    background-color: #000000;
+    background-image: url(/backgrounds/abstract.webp);
+    background-size: cover;
+    background-position: center center;
+  }
+  [data-demo-bg="campfire"] {
+    background-color: #0b1a24;
+    background-image: url(/backgrounds/campfire.webp);
+    background-size: cover;
+    background-position: center center;
+  }
+  [data-demo-bg="busy"] { background-color: #0c0d11; }
+}
+@media (max-width: 767px) {
+  html, body { overflow-x: clip; }
+  [data-demo] {
+    --demo-stage-h: max(260px, calc(42svh + env(safe-area-inset-top, 0px)));
+    background-color: #0c0d11;
+  }
+  [data-demo-stage] {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    height: var(--demo-stage-h);
+  }
+  [data-demo-stage-spacer] {
+    height: var(--demo-stage-h);
+    pointer-events: none;
+  }
+  [data-demo-stage][data-demo-bg="abstract"] { background-color: #000000; }
+  [data-demo-stage][data-demo-bg="campfire"] { background-color: #0b1a24; }
+}

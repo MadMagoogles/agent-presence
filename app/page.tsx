@@ -5,7 +5,7 @@ import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import clsx from "clsx";
 import { Pause, Play, ArrowRightLeft, CheckCircle2, XCircle, BellRing, Accessibility, LocateFixed, Bot, ChevronRight } from "lucide-react";
 import { PresenceWidget, ReduceCtx, AgentAvatar } from "@/components/presence/presence";
-import { FloatingOverlay, resetOverlayPosition } from "@/components/presence/overlay";
+import { FloatingOverlay, resetOverlayPosition, useIsMobile } from "@/components/presence/overlay";
 import { AnimationControls } from "@/components/presence/animation-controls";
 import { glassFor, IridescentShimmer } from "@/components/lab/glass";
 import { initialAgents, useSimulation, SCRIPT_LEN, type Agent, type SimState } from "@/lib/engine";
@@ -23,15 +23,6 @@ const scenes: Record<string, Partial<SimState>> = {
   ] },
   idle: { playing: false },
 };
-
-// Dark, moody abstract wallpaper — pure CSS gradients, no artwork.
-const WALLPAPER = [
-  "radial-gradient(900px 520px at 72% 62%, rgba(78,104,92,0.55), transparent 62%)",
-  "radial-gradient(700px 460px at 18% 28%, rgba(84,22,34,0.55), transparent 60%)",
-  "radial-gradient(620px 420px at 48% 8%, rgba(46,60,72,0.6), transparent 65%)",
-  "conic-gradient(from 210deg at 62% 48%, rgba(20,34,30,0.9), rgba(12,12,18,0.9), rgba(34,22,30,0.9), rgba(20,34,30,0.9))",
-  "linear-gradient(160deg, #0c0d11, #121418 50%, #0a0b0e)",
-].join(", ");
 
 type DemoBg = "abstract" | "busy" | "campfire";
 const BACKGROUNDS: { id: DemoBg; label: string }[] = [
@@ -106,7 +97,7 @@ function StatusButton({ kind, active, flashed, reduce, onClick }: { kind: Action
       animate={reduce ? { scale: 1 } : flashed ? { scale: [1, 0.96, 1] } : { scale: 1 }}
       transition={reduce ? { duration: 0 } : { duration: 0.2, ease: "easeOut" }}
       className={clsx(
-        "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-semibold",
+        "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-semibold max-md:min-h-11",
         lit ? "border-transparent text-white" : "border-white/15 text-white/80 hover:bg-white/10",
       )}
       style={lit ? { background: fill, boxShadow: `inset 0 0 0 1px ${ring}, 0 0 0 1px ${ring}66` } : undefined}
@@ -116,9 +107,120 @@ function StatusButton({ kind, active, flashed, reduce, onClick }: { kind: Action
   );
 }
 
+function CompactToolbar({ stuck, reduce, playing, onPlay, onAction, focusKind, flash, slot, visible }: {
+  stuck: boolean;
+  reduce: boolean;
+  playing: boolean;
+  onPlay: () => void;
+  onAction: (kind: ActionKind) => void;
+  focusKind: ActionKind | null;
+  flash: ActionKind | null;
+  slot: { mode: "action"; agent: { hue: string }; key: number } | { mode: "playing"; loop: number; progress: number } | null;
+  visible: boolean;
+}) {
+  return (
+    <div
+      data-compact-bar
+      data-compact-stuck={stuck ? "true" : "false"}
+      aria-hidden={!stuck}
+      inert={!stuck}
+      className="fixed inset-x-0 z-[15] hidden max-md:block"
+      style={{
+        top: "var(--demo-stage-h)",
+        opacity: stuck ? 1 : 0,
+        transform: stuck ? "translateY(0)" : "translateY(-8px)",
+        pointerEvents: stuck ? "auto" : "none",
+        transition: reduce ? "none" : "opacity 200ms ease, transform 200ms ease",
+      }}
+    >
+      <div
+        className="flex items-center gap-2 py-1"
+        style={{
+          paddingLeft: "max(1rem, env(safe-area-inset-left, 0px))",
+          paddingRight: "max(1rem, env(safe-area-inset-right, 0px))",
+          background: "rgba(20, 20, 24, 0.96)",
+          backdropFilter: "blur(12px)",
+        }}
+      >
+        <motion.button
+          type="button"
+          data-compact-play
+          aria-label={playing ? "Pause" : "Play"}
+          aria-pressed={playing}
+          onClick={onPlay}
+          whileTap={reduce ? undefined : { scale: 0.96 }}
+          className={clsx(
+            "inline-flex min-h-11 min-w-[4.5rem] flex-[1.75] items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold",
+            playing ? "border-transparent text-white" : "border-white/15 text-white hover:bg-white/10",
+          )}
+          style={playing ? { background: PLAY_FILL, boxShadow: `inset 0 0 0 1px ${PLAY_RING}, 0 0 0 1px ${PLAY_RING}66` } : undefined}
+        >
+          {playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
+          {playing ? "Pause" : "Play"}
+        </motion.button>
+        {(["working", "complete", "error", "needs"] as const).map(k => {
+          const { label, Icon, ring, fill } = actionMeta[k];
+          const lit = focusKind === k || flash === k;
+          return (
+            <motion.button
+              key={k}
+              type="button"
+              data-compact-action={k}
+              aria-label={label}
+              aria-pressed={focusKind === k}
+              onClick={() => onAction(k)}
+              whileTap={reduce ? undefined : { scale: 0.96 }}
+              animate={reduce ? { scale: 1 } : flash === k ? { scale: [1, 0.96, 1] } : { scale: 1 }}
+              transition={reduce ? { duration: 0 } : { duration: 0.2, ease: "easeOut" }}
+              className={clsx(
+                "inline-flex size-11 shrink-0 items-center justify-center rounded-lg border",
+                lit ? "border-transparent text-white" : "border-white/15 text-white/80 hover:bg-white/10",
+              )}
+              style={lit ? { background: fill, boxShadow: `inset 0 0 0 1px ${ring}, 0 0 0 1px ${ring}66` } : undefined}
+            >
+              <Icon className="size-4" aria-hidden />
+            </motion.button>
+          );
+        })}
+      </div>
+      <div className="h-[2px] overflow-hidden" aria-hidden="true" data-compact-progress style={{ backgroundColor: "rgba(20, 20, 24, 0.96)" }}>
+        <div className="h-full" style={{ opacity: visible ? 1 : 0, transition: reduce ? "none" : "opacity 200ms ease" }}>
+          {slot?.mode === "action" && (
+            <motion.div
+              key={slot.key}
+              className="h-full origin-left rounded-full"
+              style={{ background: slot.agent.hue }}
+              initial={reduce ? false : { scaleX: 0 }}
+              animate={{ scaleX: reduce ? 0 : 1 }}
+              transition={reduce ? { duration: 0 } : { duration: 5, ease: "linear" }}
+            />
+          )}
+          {slot?.mode === "playing" && (
+            <motion.div
+              key={slot.loop}
+              className="h-full origin-left rounded-full"
+              style={{ background: PLAY_RING }}
+              initial={reduce ? false : { scaleX: 0 }}
+              animate={{ scaleX: reduce ? 0 : slot.progress }}
+              transition={reduce ? { duration: 0 } : { duration: 0.1, ease: "linear" }}
+            />
+          )}
+        </div>
+      </div>
+      <div
+        data-compact-fade
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-full h-5"
+        style={{ background: "linear-gradient(to bottom, rgba(20, 20, 24, 0.96), rgba(20, 20, 24, 0))" }}
+      />
+    </div>
+  );
+}
+
 function Demo() {
   const q = useSearchParams();
   const system = useReducedMotion() ?? false;
+  const isMobile = useIsMobile();
   const [forced, setForced] = useState(q.get("rm") === "1");
   const reduce = forced || system;
   const sim = useSimulation({ playing: false, ...(scenes[q.get("scene") ?? ""] ?? {}) });
@@ -127,6 +229,9 @@ function Demo() {
   const [botStyle, setBotStyle] = useState<BotStyleId>("default");
   const [widgetSize, setWidgetSize] = useState<WidgetSizeId>("s");
   const [otherOpen, setOtherOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [compact, setCompact] = useState(false);
+  const compactSentinel = useRef<HTMLDivElement>(null);
   const [flare, setFlare] = useState(false);
   const [focus, setFocus] = useState<{ kind: ActionKind; agentId: string } | null>(null);
   const [flash, setFlash] = useState<ActionKind | null>(null);
@@ -151,7 +256,7 @@ function Demo() {
       simRef.current.play(false);
     }
   };
-  useEffect(() => {
+useEffect(() => {
     const savedBg = localStorage.getItem("agent-presence.bg");
     if (savedBg === "abstract" || savedBg === "busy" || savedBg === "campfire") setBg(savedBg);
     const savedStyle = localStorage.getItem("agent-presence.botStyle");
@@ -164,6 +269,25 @@ function Demo() {
     if (flashTimer.current) window.clearTimeout(flashTimer.current);
     if (lineTimer.current) window.clearTimeout(lineTimer.current);
   }, []);
+  useEffect(() => {
+    if (!isMobile) { setCompact(false); return; }
+    const el = compactSentinel.current;
+    if (!el) return;
+    let obs: IntersectionObserver | null = null;
+    const start = () => {
+      obs?.disconnect();
+      const stage = document.querySelector<HTMLElement>("[data-demo-stage]");
+      const top = stage?.getBoundingClientRect().height ?? 0;
+      obs = new IntersectionObserver(([entry]) => {
+        const rootTop = entry.rootBounds?.top ?? top;
+        setCompact(!entry.isIntersecting && entry.boundingClientRect.top < rootTop + 1);
+      }, { root: null, rootMargin: `-${top}px 0px 0px 0px`, threshold: 0 });
+      obs.observe(el);
+    };
+    start();
+    window.addEventListener("resize", start);
+    return () => { obs?.disconnect(); window.removeEventListener("resize", start); };
+  }, [isMobile]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey || !e.altKey || e.metaKey || e.repeat) return;
@@ -181,7 +305,12 @@ function Demo() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const chooseBg = (id: DemoBg) => { pauseIfPlaying(); setBg(id); localStorage.setItem("agent-presence.bg", id); };
+  const chooseBg = (id: DemoBg) => {
+    pauseIfPlaying();
+    if (isMobile && id === "busy") return;
+    setBg(id);
+    localStorage.setItem("agent-presence.bg", id);
+  };
   const chooseStyle = (id: BotStyleId) => { pauseIfPlaying(); setBotStyle(id); localStorage.setItem("agent-presence.botStyle", id); };
   const chooseSize = (id: WidgetSizeId) => { pauseIfPlaying(); setWidgetSize(id); localStorage.setItem("agent-presence.widgetSize", id); };
   const actions = {
@@ -269,46 +398,94 @@ function Demo() {
     : botStyle === "iridescent" ? {}
     : { ...defaults[botStyle], ...(preset.styles as Record<StyleId, object>)[botStyle] };
   const Glass = botStyle === "default" ? null : DEMO_GLASS[botStyle];
-  const mainStyle = bg === "abstract"
-    ? { background: WALLPAPER }
-    : bg === "campfire"
-      ? { backgroundColor: "#0b1a24", backgroundImage: "url(/backgrounds/campfire.webp)", backgroundSize: "cover" as const, backgroundPosition: "center center" }
-      : { backgroundColor: "#0c0d11" };
+  // On a phone, Busy screens has nothing to show, so fall back visually to
+  // Abstract without overwriting the saved desktop preference.
+  const displayBg: DemoBg = isMobile && bg === "busy" ? "abstract" : bg;
 
   return (
     <ReduceCtx.Provider value={reduce}>
       <AnimCtx.Provider value={anim.cfg}>
       <MotionConfig reducedMotion={reduce ? "always" : "never"}>
-        <main className="relative h-screen min-h-[560px] overflow-hidden text-white" style={mainStyle} data-demo-bg={bg} data-bot-style={botStyle} data-widget-size={widgetSize}>
-          {bg === "busy" && <BusyBackdrop />}
+        <main
+          data-demo
+          className="relative h-screen min-h-[560px] overflow-hidden text-white max-md:h-auto max-md:min-h-dvh max-md:overflow-visible"
+          data-demo-bg={displayBg}
+          data-bot-style={botStyle}
+          data-widget-size={widgetSize}
+        >
+          {displayBg === "busy" && <BusyBackdrop />}
 
-          <nav aria-label="Desktop Backgrounds" className="absolute top-6 left-1/2 z-10 -translate-x-1/2">
-            <div role="radiogroup" aria-label="Desktop Backgrounds" className="flex rounded-xl border border-white/10 bg-[#141418]/85 p-1 shadow-lg backdrop-blur">
-              {BACKGROUNDS.map(({ id, label }) => (
-                <button key={id} type="button" role="radio" aria-checked={bg === id} data-bg-option={id} onClick={() => chooseBg(id)}
-                  className={clsx("rounded-lg px-3 py-1.5 text-xs font-semibold", bg === id ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white")}>
-                  {label}
-                </button>
-              ))}
+          <div
+            data-demo-stage
+            data-demo-bg={displayBg}
+            className="md:contents max-md:flex max-md:flex-col max-md:overflow-hidden max-md:pt-[env(safe-area-inset-top,0px)] max-md:shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+          >
+            {(displayBg === "campfire" || displayBg === "abstract") && (
+              <picture className="pointer-events-none absolute inset-0 md:hidden" aria-hidden="true">
+                <source
+                  media="(max-width: 767px)"
+                  srcSet={`/backgrounds/${displayBg}-828.webp 828w, /backgrounds/${displayBg}-1080.webp 1080w`}
+                  sizes="100vw"
+                />
+                <img alt="" className="h-full w-full object-cover object-center" />
+              </picture>
+            )}
+
+            <div className="md:contents max-md:relative max-md:z-10 max-md:flex max-md:min-h-0 max-md:flex-1 max-md:items-center max-md:justify-center">
+              <FloatingOverlay agents={s.agents} onAnnounce={setNote} scale={widgetScale}
+                glass={Glass && styleCfg ? (open) => <Glass cfg={styleCfg} open={open} reduce={reduce} agents={s.agents} flare={flare} src={null} /> : undefined}>
+                <PresenceWidget agents={s.agents} messages={s.messages} onMsgDone={sim.msgDone} actions={actions} />
+              </FloatingOverlay>
             </div>
-          </nav>
+          </div>
+          <div data-demo-stage-spacer className="md:hidden" aria-hidden="true" />
 
-          <header className="absolute bottom-6 left-6 z-10 max-w-sm">
+            <nav aria-label="Desktop Backgrounds" data-bg-nav className="absolute top-6 left-1/2 z-10 -translate-x-1/2 max-md:hidden">
+              <div role="radiogroup" aria-label="Desktop Backgrounds" className="flex rounded-xl border border-white/10 bg-[#141418]/85 p-1 shadow-lg backdrop-blur">
+                {BACKGROUNDS.map(({ id, label }) => (
+                  <button key={id} type="button" role="radio" aria-checked={displayBg === id} data-bg-option={id} onClick={() => chooseBg(id)}
+                    className={clsx("rounded-lg px-3 py-1.5 text-xs font-semibold", displayBg === id ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white")}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </nav>
+
+          <header className="absolute bottom-6 left-6 z-10 max-w-sm max-md:hidden">
             <h1 className="text-lg font-semibold text-white">Agent Presence · overlay</h1>
             <p className="mt-1 text-sm text-white/75">A floating, near-invisible overlay for your agents. Drag it anywhere, hover for controls, hide it when you want a clean desktop. Hover or Tab to a bot for its activity; click for details.</p>
             <p className="mt-2 text-xs text-white/55"><a href="/lab/" className="underline underline-offset-2 hover:text-white">Style Lab</a><span aria-hidden="true"> · </span><a href="/desktop/" className="underline underline-offset-2 hover:text-white">Desktop shell</a></p>
           </header>
 
           {/* Director controls — demo only, not part of the widget */}
-          <section aria-label="Demo controls" className="absolute top-6 right-6 z-10 max-h-[calc(100vh-3rem)] w-72 overflow-y-auto rounded-xl border border-white/10 bg-[#141418]/85 p-4 shadow-lg backdrop-blur">
+          <section aria-label="Demo controls" className="absolute top-6 right-6 z-10 max-h-[calc(100vh-3rem)] w-72 overflow-y-auto rounded-xl border border-white/10 bg-[#141418]/85 p-4 shadow-lg backdrop-blur max-md:static max-md:z-10 max-md:mt-0 max-md:max-h-none max-md:w-full max-md:overflow-visible max-md:rounded-none max-md:rounded-t-2xl max-md:border-x-0 max-md:border-b-0 max-md:bg-[#141418] max-md:px-4 max-md:pt-5 max-md:pb-[max(1.5rem,env(safe-area-inset-bottom))] max-md:shadow-none max-md:backdrop-blur-none">
+            <div className="mb-6 md:hidden" data-mobile-about>
+              <h1 className="m-0 p-0 text-xs font-semibold">
+                <button type="button" aria-expanded={aboutOpen} aria-controls="demo-about-body" data-about-toggle
+                  onClick={() => setAboutOpen(o => !o)}
+                  className="flex w-full min-h-11 items-center gap-2 text-xs font-semibold text-white/70 hover:text-white">
+                  <span className="flex-1 text-left">Agent Presence · overlay</span>
+                  <ChevronRight className={clsx("size-3.5 shrink-0 transition-transform", aboutOpen && "rotate-90")} aria-hidden />
+                </button>
+              </h1>
+              {aboutOpen && (
+                <div id="demo-about-body" className="mt-3 space-y-2">
+                  <p className="text-sm text-white/75">A floating, near-invisible overlay for your agents. Hover or tap a bot for its activity; tap for details.</p>
+                  <p className="text-xs text-white/55"><a href="/lab/" className="underline underline-offset-2 hover:text-white">Style Lab</a><span aria-hidden="true"> · </span><a href="/desktop/" className="underline underline-offset-2 hover:text-white">Desktop shell</a></p>
+                </div>
+              )}
+            </div>
             <h2 className="text-xs font-semibold tracking-wide text-white/65 uppercase">Demo controls</h2>
+            {isMobile && <div ref={compactSentinel} data-compact-sentinel aria-hidden="true" className="pointer-events-none h-px -mb-px" />}
+            <div data-demo-actions aria-hidden={compact || undefined} inert={compact || undefined} className={compact ? "pointer-events-none" : undefined}>
             <button
               type="button"
               data-play-button
               aria-pressed={s.playing}
               onClick={onPlayClick}
+              tabIndex={compact ? -1 : undefined}
               className={clsx(
-                "mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-semibold",
+                "mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-semibold max-md:min-h-11",
                 s.playing ? "border-transparent text-white" : "border-white/15 text-white hover:bg-white/10",
               )}
               style={s.playing ? { background: PLAY_FILL, boxShadow: `inset 0 0 0 1px ${PLAY_RING}, 0 0 0 1px ${PLAY_RING}66` } : undefined}
@@ -318,7 +495,7 @@ function Demo() {
             <div className="mt-3">
               <div className="grid grid-cols-2 gap-2">
                 {anim.cfg.handoff.enabled && (
-                  <button onClick={onHandoff} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10">
+                  <button onClick={onHandoff} tabIndex={compact ? -1 : undefined} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10 max-md:min-h-11">
                     <ArrowRightLeft className="size-3.5" aria-hidden />Handoff
                   </button>
                 )}
@@ -326,7 +503,22 @@ function Demo() {
                   <StatusButton key={k} kind={k} active={focus?.kind === k} flashed={flash === k} reduce={reduce} onClick={() => onAction(k)} />
                 ))}
               </div>
-              <div className="mt-3 h-[28px] overflow-hidden" data-status-slot>
+            </div>
+            </div>
+            {isMobile && (
+              <CompactToolbar
+                stuck={compact}
+                reduce={reduce}
+                playing={s.playing}
+                onPlay={onPlayClick}
+                onAction={onAction}
+                focusKind={focus?.kind ?? null}
+                flash={flash}
+                slot={slot}
+                visible={!!visibleSlot}
+              />
+            )}
+            <div className="mt-3 h-[28px] overflow-hidden" data-status-slot>
                 <div
                   data-action-target={actionSlot ? `${actionSlot.agent.id}:${actionSlot.kind}` : undefined}
                   data-status-slot-mode={visibleSlot?.mode}
@@ -371,9 +563,19 @@ function Demo() {
                   )}
                 </div>
               </div>
-              <button type="button" data-clear-statuses onClick={clearStatuses} className="mt-3 text-xs text-white/55 hover:text-white">
+              <button type="button" data-clear-statuses onClick={clearStatuses} className="mt-3 inline-flex min-h-0 items-center text-xs text-white/55 hover:text-white max-md:min-h-11">
                 Clear statuses
               </button>
+            <div className="mt-6 border-t border-white/10 pt-6 md:hidden" data-bg-panel>
+              <h3 className="text-xs font-semibold tracking-wide text-white/65 uppercase" id="bg-label">Background</h3>
+              <div role="radiogroup" aria-labelledby="bg-label" className="mt-2 flex rounded-lg border border-white/15 p-0.5">
+                {BACKGROUNDS.filter(b => b.id !== "busy").map(({ id, label }) => (
+                  <button key={id} type="button" role="radio" aria-checked={displayBg === id} data-bg-option={id} onClick={() => chooseBg(id)}
+                    className={clsx("flex-1 rounded-md px-2 py-1.5 text-xs font-semibold min-h-11", displayBg === id ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white")}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="mt-6 border-t border-white/10 pt-6">
               <h3 className="text-xs font-semibold tracking-wide text-white/65 uppercase">Appearance</h3>
@@ -381,7 +583,7 @@ function Demo() {
               <div role="radiogroup" aria-labelledby="bot-style-label" className="mt-2 grid grid-cols-2 gap-2">
                 {BOT_STYLES.map(({ id, label }) => (
                   <button key={id} type="button" role="radio" aria-checked={botStyle === id} data-style-option={id} onClick={() => chooseStyle(id)}
-                    className={clsx("rounded-lg border px-2 py-1.5 text-xs font-semibold", botStyle === id ? "border-transparent bg-white/15 text-white" : "border-white/15 text-white/80 hover:bg-white/10")}>
+                    className={clsx("rounded-lg border px-2 py-1.5 text-xs font-semibold max-md:min-h-11", botStyle === id ? "border-transparent bg-white/15 text-white" : "border-white/15 text-white/80 hover:bg-white/10")}>
                     {label}
                   </button>
                 ))}
@@ -390,7 +592,7 @@ function Demo() {
               <div role="radiogroup" aria-labelledby="widget-size-label" className="mt-2 flex rounded-lg border border-white/15 p-0.5">
                 {WIDGET_SIZES.map(({ id, label }) => (
                   <button key={id} type="button" role="radio" aria-checked={widgetSize === id} data-size-option={id} onClick={() => chooseSize(id)}
-                    className={clsx("flex-1 rounded-md px-2 py-1.5 text-xs font-semibold", widgetSize === id ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white")}>
+                    className={clsx("flex-1 rounded-md px-2 py-1.5 text-xs font-semibold max-md:min-h-11", widgetSize === id ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white")}>
                     {label}
                   </button>
                 ))}
@@ -400,14 +602,14 @@ function Demo() {
             <div className="mt-6 border-t border-white/10 pt-6">
               <button type="button" aria-expanded={otherOpen} aria-controls="demo-other-options" data-other-toggle
                 onClick={() => setOtherOpen(o => !o)}
-                className="flex w-full items-center gap-2 text-xs font-semibold text-white/70 hover:text-white">
+                className="flex w-full items-center gap-2 text-xs font-semibold text-white/70 hover:text-white max-md:min-h-11">
                 <ChevronRight className={clsx("size-3.5 shrink-0 transition-transform", otherOpen && "rotate-90")} aria-hidden />
                 Other
               </button>
               {otherOpen && (
                 <div id="demo-other-options" className="mt-3 space-y-3">
-                  <button onClick={resetOverlayPosition} className="inline-flex items-center gap-2 text-xs text-white/70 hover:text-white"><LocateFixed className="size-3.5" aria-hidden /> Reset overlay position</button>
-                  <label className="flex items-center gap-2 text-xs text-white/75">
+                  <button onClick={resetOverlayPosition} data-reset-position className="inline-flex items-center gap-2 text-xs text-white/70 hover:text-white max-md:hidden"><LocateFixed className="size-3.5" aria-hidden /> Reset overlay position</button>
+                  <label className="flex items-center gap-2 text-xs text-white/75 max-md:min-h-11">
                     <input type="checkbox" checked={reduce} disabled={system} onChange={e => setForced(e.target.checked)} />
                     <Accessibility className="size-3.5" aria-hidden /> Reduced motion{system ? " (system)" : ""}
                   </label>
@@ -418,11 +620,6 @@ function Demo() {
 
           <p role="status" aria-live="polite" className="sr-only">{s.announce}</p>
           <p role="status" aria-live="polite" data-overlay-status className="sr-only">{note}</p>
-
-          <FloatingOverlay agents={s.agents} onAnnounce={setNote} scale={widgetScale}
-            glass={Glass && styleCfg ? (open) => <Glass cfg={styleCfg} open={open} reduce={reduce} agents={s.agents} flare={flare} src={null} /> : undefined}>
-            <PresenceWidget agents={s.agents} messages={s.messages} onMsgDone={sim.msgDone} actions={actions} />
-          </FloatingOverlay>
         </main>
       </MotionConfig>
       </AnimCtx.Provider>

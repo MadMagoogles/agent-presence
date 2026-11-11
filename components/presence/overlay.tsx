@@ -9,15 +9,30 @@ import { useAnim } from "@/lib/anim-config";
 const KEY = "agent-overlay-pos";
 const THRESHOLD = 4; // px before a press becomes a drag, so clicks still open bot popovers
 const spring = { type: "spring", stiffness: 420, damping: 34, mass: 0.8 } as const; // ~250ms settle
+const MOBILE_MQ = "(max-width: 767px)";
 type Pos = { x: number; y: number };
+
+export function useIsMobile() {
+  const [mobile, setMobile] = useState(false);
+  useLayoutEffect(() => {
+    const mq = window.matchMedia(MOBILE_MQ);
+    const on = () => setMobile(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return mobile;
+}
 
 /**
  * Floating, draggable, hideable shell around the presence strip.
  * Default: near-invisible dark pill. Hover / focus-within: only reveal × with the existing width transition.
+ * On mobile (<768px) the shell is pinned in its parent: not draggable, not closable.
  */
 /** `glass` swaps the default pill surface (Style Lab); `forceOpen` pins the hover state for demos. */
 export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen = false, scale = 1 }: { agents: Agent[]; children: ReactNode; onAnnounce: (m: string) => void; glass?: (open: boolean) => ReactNode; forceOpen?: boolean; /** Demo / recording scale; CSS transform so drag still works. Stroke scales with it. */ scale?: number }) {
   const reduce = useReduceMotion();
+  const pinned = useIsMobile();
   const n = useAnim().needs;
   const ref = useRef<HTMLDivElement>(null);
   const chipRef = useRef<HTMLButtonElement>(null);
@@ -34,6 +49,7 @@ export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen
     root.style.cursor = "grabbing";
     return () => { root.style.cursor = previous; };
   }, [dragging]);
+  useEffect(() => { if (pinned) { setHidden(false); setDragging(false); drag.current = null; } }, [pinned]);
   const open = hover || focusIn || dragging || forceOpen;
   const needsYou = agents.some(a => a.status === "needs" || a.status === "error");
 
@@ -47,6 +63,7 @@ export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen
 
   // initial position: saved, else top centre (using the visual, scaled width)
   useLayoutEffect(() => {
+    if (pinned) return;
     if (!inited.current) {
       inited.current = true;
       let p: Pos | null = null;
@@ -56,10 +73,11 @@ export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen
     }
     const onResize = () => setPos(q => q && clamp(q));
     window.addEventListener("resize", onResize); return () => window.removeEventListener("resize", onResize);
-  }, [clamp, scale]);
+  }, [clamp, scale, pinned]);
 
   // Keep the visual centre anchored when S/M/L (or lab) scale changes.
   useLayoutEffect(() => {
+    if (pinned) return;
     const prev = scaleRef.current;
     if (prev === scale) return;
     scaleRef.current = scale;
@@ -70,15 +88,16 @@ export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen
       const cx = q.x + (uw * prev) / 2, cy = q.y + (uh * prev) / 2;
       return clamp({ x: cx - (uw * scale) / 2, y: cy - (uh * scale) / 2 });
     });
-  }, [scale, clamp]);
+  }, [scale, clamp, pinned]);
   const commit = (p: Pos) => { const c = clamp(p); setPos(c); try { localStorage.setItem(KEY, JSON.stringify(c)); } catch {} return c; };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 || !pos) return;
+    if (pinned || e.button !== 0 || !pos) return;
     if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
     drag.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y, moved: false };
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (pinned) return;
     const d = drag.current; if (!d || d.id !== e.pointerId) return;
     const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
     if (!d.moved && Math.hypot(dx, dy) < THRESHOLD) return;
@@ -86,13 +105,14 @@ export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen
     setPos(clamp({ x: d.ox + dx, y: d.oy + dy }));
   };
   const onPointerUp = (e: React.PointerEvent) => {
+    if (pinned) return;
     const d = drag.current; drag.current = null; if (!d) return;
     if (d.moved) { suppressClick.current = true; setDragging(false); commit({ x: d.ox + e.clientX - d.sx, y: d.oy + e.clientY - d.sy }); }
   };
   const onClickCapture = (e: React.MouseEvent) => { if (suppressClick.current) { suppressClick.current = false; e.stopPropagation(); e.preventDefault(); } };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.target !== ref.current || !pos) return;
+    if (pinned || e.target !== ref.current || !pos) return;
     const step = e.shiftKey ? 48 : 8;
     const d = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, number[]>)[e.key];
     if (!d) return; e.preventDefault();
@@ -100,23 +120,27 @@ export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen
     onAnnounce(`Agents overlay moved to ${Math.round(c.x)}, ${Math.round(c.y)}`);
   };
 
-  const hide = () => { setHidden(true); setHover(false); setFocusIn(false); onAnnounce("Agents overlay hidden. Press Alt+Shift+A or use Show agents to bring it back."); requestAnimationFrame(() => chipRef.current?.focus()); };
+  const hide = () => { if (pinned) return; setHidden(true); setHover(false); setFocusIn(false); onAnnounce("Agents overlay hidden. Press Alt+Shift+A or use Show agents to bring it back."); requestAnimationFrame(() => chipRef.current?.focus()); };
   const show = () => { setHidden(false); onAnnounce("Agents overlay shown"); setTimeout(() => ref.current?.focus(), 30); };
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.altKey && e.shiftKey && e.code === "KeyA") { e.preventDefault(); hidden ? show() : hide(); } };
+    const k = (e: KeyboardEvent) => { if (pinned) return; if (e.altKey && e.shiftKey && e.code === "KeyA") { e.preventDefault(); hidden ? show() : hide(); } };
     window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k);
   });
 
   return (
     <>
       <AnimatePresence>
-        {!hidden && (
-          <motion.div key="overlay" ref={ref} role="group" tabIndex={0} data-overlay data-open={open} data-demo-scale={scale}
-            aria-label="Agents overlay. Drag to move, or use arrow keys while focused (Shift for bigger steps). Alt+Shift+A hides it."
-            className="fixed z-30 touch-none select-none rounded-2xl outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
-            style={{ left: pos?.x ?? -9999, top: pos?.y ?? 96, cursor: dragging ? "grabbing" : "default", visibility: pos ? "visible" : "hidden",
-              transformOrigin: "top left", // demo scale + drag pop share one origin so clamp math stays simple
-            }}
+        {(!hidden || pinned) && (
+          <motion.div key="overlay" ref={ref} role="group" tabIndex={0} data-overlay data-open={open} data-demo-scale={scale} data-pinned={pinned ? "true" : "false"}
+            aria-label={pinned ? "Agents overlay" : "Agents overlay. Drag to move, or use arrow keys while focused (Shift for bigger steps). Alt+Shift+A hides it."}
+            className={pinned
+              ? "relative z-30 select-none rounded-2xl outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+              : "fixed z-30 touch-none select-none rounded-2xl outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"}
+            style={pinned
+              ? { transformOrigin: "center center", cursor: "default" }
+              : { left: pos?.x ?? -9999, top: pos?.y ?? 96, cursor: dragging ? "grabbing" : "default", visibility: pos ? "visible" : "hidden",
+                  transformOrigin: "top left", // demo scale + drag pop share one origin so clamp math stays simple
+                }}
             initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.94 * scale, y: -6 }}
             animate={{ opacity: 1, scale: (dragging && !reduce ? 1.02 : 1) * scale, y: 0 }}
             exit={reduce ? { opacity: 0, transition: { duration: 0.12 } } : { opacity: 0, scale: 0.92 * scale, y: -8, filter: "blur(4px)", transition: { duration: 0.22, ease: [0.4, 0, 1, 1] } }}
@@ -135,15 +159,17 @@ export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen
             </>}
             <div className="relative flex items-center">
               <motion.div initial={false} animate={{ paddingLeft: 6 }} transition={reduce ? { duration: 0 } : spring}>{children}</motion.div>
-              <motion.div initial={false} className="overflow-hidden" animate={{ width: 40 }} transition={reduce ? { duration: 0 } : spring}>
-                <AnimatePresence>
-                  {open && <motion.button key="x" data-no-drag type="button" onClick={hide} aria-label="Hide agents overlay"
-                    initial={{ opacity: 0, scale: reduce ? 1 : 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduce ? 1 : 0.6 }} transition={{ duration: 0.18 }}
-                    className="ml-1 flex size-7 cursor-[inherit] items-center justify-center rounded-lg text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-white/70">
-                    <X className="size-4" strokeWidth={2} aria-hidden />
-                  </motion.button>}
-                </AnimatePresence>
-              </motion.div>
+              {!pinned && (
+                <motion.div initial={false} className="overflow-hidden" animate={{ width: 40 }} transition={reduce ? { duration: 0 } : spring}>
+                  <AnimatePresence>
+                    {open && <motion.button key="x" data-no-drag type="button" onClick={hide} aria-label="Hide agents overlay"
+                      initial={{ opacity: 0, scale: reduce ? 1 : 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reduce ? 1 : 0.6 }} transition={{ duration: 0.18 }}
+                      className="ml-1 flex size-7 cursor-[inherit] items-center justify-center rounded-lg text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-white/70">
+                      <X className="size-4" strokeWidth={2} aria-hidden />
+                    </motion.button>}
+                  </AnimatePresence>
+                </motion.div>
+              )}
             </div>
 
           </motion.div>
@@ -151,7 +177,7 @@ export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen
       </AnimatePresence>
 
       <AnimatePresence>
-        {hidden && (
+        {hidden && !pinned && (
           <motion.button key="chip" ref={chipRef} type="button" onClick={show} data-restore data-needs={needsYou}
             aria-label={`Show agents${needsYou ? ", an agent needs you" : ""} (Alt+Shift+A)`}
             initial={{ opacity: 0, y: reduce ? 0 : 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reduce ? 0 : 8 }} transition={reduce ? { duration: 0.1 } : spring}
