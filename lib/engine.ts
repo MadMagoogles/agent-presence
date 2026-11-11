@@ -20,7 +20,7 @@ type Action =
   | { type: "tick"; dt: number } | { type: "play"; on: boolean } | { type: "speed"; v: number }
   | { type: "set"; id: string; status: AgentStatus; activity?: Activity; say?: string }
   | { type: "msg"; from: string; to: string; text: string } | { type: "msgDone"; id: number }
-  | { type: "load"; state: Partial<SimState> };
+  | { type: "load"; state: Partial<SimState> } | { type: "restart" };
 
 /** Scripted day in the life: times in sim-ms. Loops. */
 type Step = { at: number; run: (s: SimState) => Action[] };
@@ -41,7 +41,7 @@ export const SCRIPT: Step[] = [
   { at: 24000, run: (s) => s.agents.find(a => a.id === "moss")?.status === "needs" ? [set("moss", "working", { verb: "Deploying", target: "v2.4 to staging" }, "Moss auto-approved for the demo loop")] : [] },
   { at: 27000, run: (s) => s.agents.find(a => a.id === "moss")?.status === "working" ? [set("moss", "done", { verb: "Deployed", target: "v2.4 to staging", output: "staging.acme.dev · healthy" })] : [] },
 ];
-const SCRIPT_LEN = 31000;
+export const SCRIPT_LEN = 31000;
 const DONE_HOLD = 2600; // done → settles back to idle
 
 const statusWord: Record<AgentStatus, string> = { idle: "is idle", working: "started", needs: "needs you", done: "finished", error: "hit an error" };
@@ -50,6 +50,16 @@ let msgId = 1;
 function reducer(s: SimState, a: Action): SimState {
   switch (a.type) {
     case "play": return { ...s, playing: a.on, announce: a.on ? "Simulation playing" : "Simulation paused" };
+    case "restart": return {
+      ...s,
+      t: 0,
+      playing: true,
+      cursor: 0,
+      loop: 0,
+      agents: initialAgents.map(a => ({ ...a, activity: { ...a.activity } })),
+      messages: [],
+      announce: "Simulation playing",
+    };
     case "speed": return { ...s, speed: a.v };
     case "load": return { ...s, ...a.state };
     case "msgDone": return { ...s, messages: s.messages.filter(m => m.id !== a.id) };
@@ -121,7 +131,9 @@ export function useSimulation(init?: Partial<SimState>) {
   }, []);
   return {
     s, trigger,
-    play: (on: boolean) => dispatch({ type: "play", on }), speed: (v: number) => dispatch({ type: "speed", v }),
+    play: (on: boolean) => dispatch({ type: "play", on }),
+    restart: () => dispatch({ type: "restart" }),
+    speed: (v: number) => dispatch({ type: "speed", v }),
     setStatus: (id: string, status: AgentStatus, activity?: Activity, say?: string) => dispatch(set(id, status, activity, say)),
     msgDone: (id: number) => dispatch({ type: "msgDone", id }),
     sendMsg: (from: string, to: string, text: string) => dispatch({ type: "msg", from, to, text }),

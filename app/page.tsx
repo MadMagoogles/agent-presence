@@ -8,7 +8,7 @@ import { PresenceWidget, ReduceCtx, AgentAvatar } from "@/components/presence/pr
 import { FloatingOverlay, resetOverlayPosition } from "@/components/presence/overlay";
 import { AnimationControls } from "@/components/presence/animation-controls";
 import { glassFor, IridescentShimmer } from "@/components/lab/glass";
-import { initialAgents, useSimulation, type Agent, type SimState } from "@/lib/engine";
+import { initialAgents, useSimulation, SCRIPT_LEN, type Agent, type SimState } from "@/lib/engine";
 import { AnimCtx, useAnimSettings } from "@/lib/anim-config";
 import { defaults, type StyleId } from "@/lib/lab-config";
 import { drawBackdrop } from "@/lib/backdrops";
@@ -69,6 +69,8 @@ const actionMeta = {
   needs: { label: "Needs you", Icon: BellRing, ring: "#fbbf24", fill: "rgba(251,191,36,0.22)", phrase: "needs you", status: "needs" },
 } as const;
 type ActionKind = keyof typeof actionMeta;
+const PLAY_RING = "#4ade80";
+const PLAY_FILL = "rgba(74, 222, 128, 0.22)";
 
 function BusyBackdrop() {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -132,10 +134,23 @@ function Demo() {
   const flashTimer = useRef<number | null>(null);
   const lineTimer = useRef<number | null>(null);
   const lineGen = useRef(0);
-  const lastStatusSlot = useRef<{ agent: Agent; kind: ActionKind; key: number } | null>(null);
+  const lastStatusSlot = useRef<
+    | { mode: "action"; agent: Agent; kind: ActionKind; key: number }
+    | { mode: "playing"; loop: number; progress: number }
+    | null
+  >(null);
+  const interrupted = useRef(false);
   const { s } = sim;
   const agentsRef = useRef(s.agents);
   agentsRef.current = s.agents;
+  const simRef = useRef(sim);
+  simRef.current = sim;
+  const pauseIfPlaying = () => {
+    if (simRef.current.s.playing) {
+      interrupted.current = true;
+      simRef.current.play(false);
+    }
+  };
   useEffect(() => {
     const savedBg = localStorage.getItem("agent-presence.bg");
     if (savedBg === "abstract" || savedBg === "busy" || savedBg === "campfire") setBg(savedBg);
@@ -156,15 +171,19 @@ function Demo() {
       const id = map[e.key];
       if (!id) return;
       e.preventDefault();
+      if (simRef.current.s.playing) {
+        interrupted.current = true;
+        simRef.current.play(false);
+      }
       setBotStyle(id);
       localStorage.setItem("agent-presence.botStyle", id);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const chooseBg = (id: DemoBg) => { setBg(id); localStorage.setItem("agent-presence.bg", id); };
-  const chooseStyle = (id: BotStyleId) => { setBotStyle(id); localStorage.setItem("agent-presence.botStyle", id); };
-  const chooseSize = (id: WidgetSizeId) => { setWidgetSize(id); localStorage.setItem("agent-presence.widgetSize", id); };
+  const chooseBg = (id: DemoBg) => { pauseIfPlaying(); setBg(id); localStorage.setItem("agent-presence.bg", id); };
+  const chooseStyle = (id: BotStyleId) => { pauseIfPlaying(); setBotStyle(id); localStorage.setItem("agent-presence.botStyle", id); };
+  const chooseSize = (id: WidgetSizeId) => { pauseIfPlaying(); setWidgetSize(id); localStorage.setItem("agent-presence.widgetSize", id); };
   const actions = {
     approve: (a: Agent) => sim.setStatus(a.id, "working", { verb: a.activity.verb.replace(/^Deploy$/, "Deploying").replace(/^Send$/, "Sending"), target: a.activity.target }, `Approved. ${a.name} is continuing`),
     decline: (a: Agent) => sim.setStatus(a.id, "idle", undefined, `Declined. ${a.name} stopped: ${a.activity.target}`),
@@ -172,9 +191,12 @@ function Demo() {
   };
   const [note, setNote] = useState("");
   const focusedAgent = focus ? s.agents.find(a => a.id === focus.agentId) : undefined;
-  const statusSlot = focusedAgent && focus ? { agent: focusedAgent, kind: focus.kind, key: lineKey } : null;
-  if (statusSlot) lastStatusSlot.current = statusSlot;
-  const slot = statusSlot ?? lastStatusSlot.current;
+  const actionSlot = focusedAgent && focus ? { mode: "action" as const, agent: focusedAgent, kind: focus.kind, key: lineKey } : null;
+  const loopProgress = Math.min(1, Math.max(0, (s.t - s.loop * SCRIPT_LEN) / SCRIPT_LEN));
+  const playingSlot = s.playing ? { mode: "playing" as const, loop: s.loop, progress: loopProgress } : null;
+  const visibleSlot = actionSlot ?? playingSlot;
+  if (visibleSlot) lastStatusSlot.current = visibleSlot;
+  const slot = visibleSlot ?? lastStatusSlot.current;
   const doneCount = s.agents.filter(a => a.status === "done").length;
   useEffect(() => { if (!doneCount) return; setFlare(true); const t = window.setTimeout(() => setFlare(false), 1400); return () => window.clearTimeout(t); }, [doneCount]);
   const idleAll = () => { for (const a of agentsRef.current) if (a.status !== "idle") sim.setStatus(a.id, "idle"); };
@@ -197,6 +219,7 @@ function Demo() {
     }, 5000);
   };
   const onAction = (kind: ActionKind) => {
+    pauseIfPlaying();
     const agent = sim.trigger(kind);
     if (!agent) return;
     // Replace any previous status: idle the other bots, then startLineTimer
@@ -210,12 +233,36 @@ function Demo() {
     startLineTimer();
   };
   const clearStatuses = () => {
+    pauseIfPlaying();
     lineGen.current += 1;
     stopLineTimer();
     setFocus(null);
     setFlash(null);
     if (flashTimer.current) window.clearTimeout(flashTimer.current);
     idleAll();
+  };
+  const onHandoff = () => {
+    pauseIfPlaying();
+    sim.trigger("handoff");
+  };
+  const onPlayClick = () => {
+    if (s.playing) {
+      interrupted.current = false;
+      sim.play(false);
+      return;
+    }
+    stopLineTimer();
+    lineGen.current += 1;
+    setFocus(null);
+    setFlash(null);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    if (interrupted.current) {
+      interrupted.current = false;
+      idleAll();
+      sim.restart();
+    } else {
+      sim.play(true);
+    }
   };
   const widgetScale = WIDGET_SIZES.find(sz => sz.id === widgetSize)!.scale;
   const styleCfg = botStyle === "default" ? null
@@ -255,13 +302,23 @@ function Demo() {
           {/* Director controls — demo only, not part of the widget */}
           <section aria-label="Demo controls" className="absolute top-6 right-6 z-10 max-h-[calc(100vh-3rem)] w-72 overflow-y-auto rounded-xl border border-white/10 bg-[#141418]/85 p-4 shadow-lg backdrop-blur">
             <h2 className="text-xs font-semibold tracking-wide text-white/65 uppercase">Demo controls</h2>
-            <button onClick={() => sim.play(!s.playing)} className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-sm font-semibold text-white hover:bg-white/10">
+            <button
+              type="button"
+              data-play-button
+              aria-pressed={s.playing}
+              onClick={onPlayClick}
+              className={clsx(
+                "mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-semibold",
+                s.playing ? "border-transparent text-white" : "border-white/15 text-white hover:bg-white/10",
+              )}
+              style={s.playing ? { background: PLAY_FILL, boxShadow: `inset 0 0 0 1px ${PLAY_RING}, 0 0 0 1px ${PLAY_RING}66` } : undefined}
+            >
               {s.playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}{s.playing ? "Pause" : "Play"}
             </button>
             <div className="mt-3">
               <div className="grid grid-cols-2 gap-2">
                 {anim.cfg.handoff.enabled && (
-                  <button onClick={() => sim.trigger("handoff")} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10">
+                  <button onClick={onHandoff} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10">
                     <ArrowRightLeft className="size-3.5" aria-hidden />Handoff
                   </button>
                 )}
@@ -271,12 +328,13 @@ function Demo() {
               </div>
               <div className="mt-3 h-[28px] overflow-hidden" data-status-slot>
                 <div
-                  data-action-target={statusSlot ? `${statusSlot.agent.id}:${statusSlot.kind}` : undefined}
+                  data-action-target={actionSlot ? `${actionSlot.agent.id}:${actionSlot.kind}` : undefined}
+                  data-status-slot-mode={visibleSlot?.mode}
                   className="h-full"
-                  style={{ opacity: statusSlot ? 1 : 0, transition: reduce ? "none" : "opacity 200ms ease" }}
-                  aria-hidden={!statusSlot}
+                  style={{ opacity: visibleSlot ? 1 : 0, transition: reduce ? "none" : "opacity 200ms ease" }}
+                  aria-hidden={!visibleSlot}
                 >
-                  {slot && (
+                  {slot?.mode === "action" && (
                     <>
                       <p className="flex items-center gap-1.5 text-xs text-white/80">
                         <AgentAvatar agent={slot.agent} size={16} />
@@ -290,6 +348,23 @@ function Demo() {
                           initial={reduce ? false : { scaleX: 0 }}
                           animate={{ scaleX: reduce ? 0 : 1 }}
                           transition={reduce ? { duration: 0 } : { duration: 5, ease: "linear" }}
+                        />
+                      </div>
+                    </>
+                  )}
+                  {slot?.mode === "playing" && (
+                    <>
+                      <p className="flex items-center gap-1.5 text-xs text-white/80">
+                        <span className="font-semibold text-white">Playing demo</span>
+                      </p>
+                      <div className="mt-2 h-[2px] overflow-hidden rounded-full bg-white/10" aria-hidden="true" data-status-progress data-loop-progress={slot.progress.toFixed(4)}>
+                        <motion.div
+                          key={slot.loop}
+                          className="h-full origin-left rounded-full"
+                          style={{ background: PLAY_RING }}
+                          initial={reduce ? false : { scaleX: 0 }}
+                          animate={{ scaleX: reduce ? 0 : slot.progress }}
+                          transition={reduce ? { duration: 0 } : { duration: 0.1, ease: "linear" }}
                         />
                       </div>
                     </>
