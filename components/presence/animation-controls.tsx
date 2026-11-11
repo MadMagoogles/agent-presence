@@ -7,8 +7,8 @@ export function AnimationControls({ cfg, update, reset }: { cfg: AnimConfig; upd
   const [copied, setCopied] = useState(false);
   const copy = async () => { await navigator.clipboard.writeText(JSON.stringify(cfg, null, 2)); setCopied(true); setTimeout(() => setCopied(false), 1400); };
   return (
-    <div className="mt-3 border-t border-white/10 pt-3">
-      <div className="mb-1.5 flex items-center justify-between">
+    <div className="mt-6 border-t border-white/10 pt-6">
+      <div className="mb-2 flex items-center justify-between">
         <h2 className="text-xs font-semibold tracking-wide text-white/65 uppercase">Animation tuning</h2>
         <div className="flex gap-1">
           <button onClick={copy} aria-label="Copy settings as JSON" title="Copy settings as JSON" className="rounded-md p-1 text-white/70 hover:bg-white/10 hover:text-white">

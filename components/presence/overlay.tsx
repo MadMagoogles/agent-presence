@@ -42,16 +42,35 @@ export function FloatingOverlay({ agents, children, onAnnounce, glass, forceOpen
     const el = ref.current; const w = (el?.offsetWidth ?? 240) * scale, h = (el?.offsetHeight ?? 60) * scale, m = 8;
     return { x: Math.min(Math.max(m, p.x), window.innerWidth - w - m), y: Math.min(Math.max(m, p.y), window.innerHeight - h - m) };
   }, [scale]);
+  const scaleRef = useRef(scale);
+  const inited = useRef(false);
 
-  // initial position: saved, else top centre
+  // initial position: saved, else top centre (using the visual, scaled width)
   useLayoutEffect(() => {
-    let p: Pos | null = null;
-    try { p = JSON.parse(localStorage.getItem(KEY) ?? "null"); } catch {}
-    const w = ref.current?.offsetWidth ?? 232;
-    setPos(clamp(p ?? { x: (window.innerWidth - w) / 2, y: 96 }));
+    if (!inited.current) {
+      inited.current = true;
+      let p: Pos | null = null;
+      try { p = JSON.parse(localStorage.getItem(KEY) ?? "null"); } catch {}
+      const w = (ref.current?.offsetWidth ?? 232) * scale;
+      setPos(clamp(p ?? { x: (window.innerWidth - w) / 2, y: 96 }));
+    }
     const onResize = () => setPos(q => q && clamp(q));
     window.addEventListener("resize", onResize); return () => window.removeEventListener("resize", onResize);
-  }, [clamp]);
+  }, [clamp, scale]);
+
+  // Keep the visual centre anchored when S/M/L (or lab) scale changes.
+  useLayoutEffect(() => {
+    const prev = scaleRef.current;
+    if (prev === scale) return;
+    scaleRef.current = scale;
+    setPos(q => {
+      if (!q) return q;
+      const el = ref.current;
+      const uw = el?.offsetWidth ?? 232, uh = el?.offsetHeight ?? 60;
+      const cx = q.x + (uw * prev) / 2, cy = q.y + (uh * prev) / 2;
+      return clamp({ x: cx - (uw * scale) / 2, y: cy - (uh * scale) / 2 });
+    });
+  }, [scale, clamp]);
   const commit = (p: Pos) => { const c = clamp(p); setPos(c); try { localStorage.setItem(KEY, JSON.stringify(c)); } catch {} return c; };
 
   const onPointerDown = (e: React.PointerEvent) => {

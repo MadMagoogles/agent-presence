@@ -66,9 +66,6 @@ check("handoff trigger hidden while handoff animation is off", (await page.getBy
 check("animation tuning panel present", await page.getByRole("heading", { name: "Animation tuning" }).isVisible());
 await page.getByRole("button", { name: "Working", exact: true }).click(); await page.waitForTimeout(250);
 check("working trigger → a bot is working", (await page.locator('[data-status="working"]').count()) >= 1);
-await page.getByRole("checkbox", { name: "Status summary text" }).uncheck();
-check("status summary text can be hidden", (await page.getByText("1 working").count()) === 0);
-await page.getByRole("checkbox", { name: "Status summary text" }).check();
 
 // Director: trigger handoff announces message (handoff enabled via saved tuning)
 await page.evaluate(() => localStorage.setItem("agent-presence.anim", JSON.stringify({ handoff: { enabled: true } })));

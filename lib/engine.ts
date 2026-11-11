@@ -90,13 +90,34 @@ export function useSimulation(init?: Partial<SimState>) {
     return () => clearInterval(id);
   }, []);
   const ref = useRef(s); ref.current = s;
+  const lastStatusId = useRef<string | null>(null);
   const pick = (pref: AgentStatus[], not?: string) => { const ags = ref.current.agents.filter(x => x.id !== not); for (const p of pref) { const f = ags.find(x => x.status === p); if (f) return f; } return ags[Math.floor(Math.random() * ags.length)]; };
-  const trigger = useCallback((kind: "handoff" | "working" | "complete" | "error" | "needs") => {
-    if (kind === "working") { const a = pick(["idle", "done", "error"]); dispatch(set(a.id, "working", { verb: "Drafting", target: "weekly status update", input: "sources: standup notes, merged PRs" })); }
-    if (kind === "handoff") { const from = pick(["working", "done", "idle"]); const to = pick(["idle", "working"], from.id); dispatch({ type: "msg", from: from.id, to: to.id, text: `Handing off: ${from.activity.target}` }); dispatch(set(to.id, "working", { verb: "Picking up", target: from.activity.target === "waiting for work" ? "shared task" : from.activity.target }, `${from.name} to ${to.name}: Handing off ${from.activity.target}`)); }
-    if (kind === "complete") { const a = pick(["working", "needs", "error", "idle"]); dispatch(set(a.id, "done", { ...a.activity, verb: a.activity.verb === "Idle" ? "Finished" : a.activity.verb, target: a.activity.target === "waiting for work" ? "quick task" : a.activity.target, output: "Completed successfully" })); }
-    if (kind === "error") { const a = pick(["working", "idle"]); dispatch(set(a.id, "error", { verb: a.status === "working" ? a.activity.verb : "Fetching", target: a.status === "working" ? a.activity.target : "design tokens", error: "Request timed out after 30s" })); }
-    if (kind === "needs") { const a = pick(["working", "idle"]); dispatch(set(a.id, "needs", { verb: "Send", target: "email to 3 reviewers", input: "needs your approval" })); }
+  /** Random bot among preferred statuses; never the same bot twice in a row when another is available. */
+  const pickStatus = (pref: AgentStatus[], not?: string) => {
+    const ags = ref.current.agents.filter(x => x.id !== not);
+    const seen = new Set<string>();
+    const matching: Agent[] = [];
+    for (const p of pref) for (const a of ags) if (a.status === p && !seen.has(a.id)) { seen.add(a.id); matching.push(a); }
+    const avoidRepeat = (pool: Agent[]) => {
+      if (lastStatusId.current && pool.length > 1) {
+        const others = pool.filter(a => a.id !== lastStatusId.current);
+        if (others.length) return others;
+      }
+      return pool;
+    };
+    let pool = avoidRepeat(matching);
+    if (!pool.length) pool = avoidRepeat(ags);
+    if (!pool.length) pool = ags;
+    const a = pool[Math.floor(Math.random() * pool.length)];
+    if (a) lastStatusId.current = a.id;
+    return a;
+  };
+  const trigger = useCallback((kind: "handoff" | "working" | "complete" | "error" | "needs"): Agent | undefined => {
+    if (kind === "working") { const a = pickStatus(["idle", "done", "error"]); dispatch(set(a.id, "working", { verb: "Drafting", target: "weekly status update", input: "sources: standup notes, merged PRs" })); return a; }
+    if (kind === "handoff") { const from = pick(["working", "done", "idle"]); const to = pick(["idle", "working"], from.id); dispatch({ type: "msg", from: from.id, to: to.id, text: `Handing off: ${from.activity.target}` }); dispatch(set(to.id, "working", { verb: "Picking up", target: from.activity.target === "waiting for work" ? "shared task" : from.activity.target }, `${from.name} to ${to.name}: Handing off ${from.activity.target}`)); return to; }
+    if (kind === "complete") { const a = pickStatus(["working", "needs", "error", "idle"]); dispatch(set(a.id, "done", { ...a.activity, verb: a.activity.verb === "Idle" ? "Finished" : a.activity.verb, target: a.activity.target === "waiting for work" ? "quick task" : a.activity.target, output: "Completed successfully" })); return a; }
+    if (kind === "error") { const a = pickStatus(["working", "idle"]); dispatch(set(a.id, "error", { verb: a.status === "working" ? a.activity.verb : "Fetching", target: a.status === "working" ? a.activity.target : "design tokens", error: "Request timed out after 30s" })); return a; }
+    if (kind === "needs") { const a = pickStatus(["working", "idle"]); dispatch(set(a.id, "needs", { verb: "Send", target: "email to 3 reviewers", input: "needs your approval" })); return a; }
   }, []);
   return {
     s, trigger,

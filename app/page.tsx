@@ -1,14 +1,18 @@
 "use client";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { MotionConfig, useReducedMotion } from "motion/react";
+import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import clsx from "clsx";
-import { Pause, Play, ArrowRightLeft, CheckCircle2, XCircle, BellRing, Accessibility, LocateFixed, Bot, Text } from "lucide-react";
-import { PresenceWidget, ReduceCtx } from "@/components/presence/presence";
+import { Pause, Play, ArrowRightLeft, CheckCircle2, XCircle, BellRing, Accessibility, LocateFixed, Bot, ChevronRight } from "lucide-react";
+import { PresenceWidget, ReduceCtx, AgentAvatar } from "@/components/presence/presence";
 import { FloatingOverlay, resetOverlayPosition } from "@/components/presence/overlay";
 import { AnimationControls } from "@/components/presence/animation-controls";
+import { glassFor, IridescentShimmer } from "@/components/lab/glass";
 import { initialAgents, useSimulation, type Agent, type SimState } from "@/lib/engine";
 import { AnimCtx, useAnimSettings } from "@/lib/anim-config";
+import { defaults, type StyleId } from "@/lib/lab-config";
+import { drawBackdrop } from "@/lib/backdrops";
+import preset from "@/presets/jacob-2026-11-03.json";
 
 const scenes: Record<string, Partial<SimState>> = {
   states: { playing: false, agents: [
@@ -29,70 +33,319 @@ const WALLPAPER = [
   "linear-gradient(160deg, #0c0d11, #121418 50%, #0a0b0e)",
 ].join(", ");
 
+type DemoBg = "abstract" | "busy" | "campfire";
+const BACKGROUNDS: { id: DemoBg; label: string }[] = [
+  { id: "abstract", label: "Abstract" },
+  { id: "busy", label: "Busy screens" },
+  { id: "campfire", label: "Campfire" },
+];
+
+type BotStyleId = "default" | "frosted" | "dark" | "iridescent" | "aurora";
+const BOT_STYLES: { id: BotStyleId; label: string }[] = [
+  { id: "default", label: "Default" },
+  { id: "frosted", label: "Frosted grain" },
+  { id: "dark", label: "Dark glass" },
+  { id: "iridescent", label: "Iridescent" },
+  { id: "aurora", label: "Aurora glow" },
+];
+const DEMO_GLASS: Partial<Record<BotStyleId, typeof glassFor.frosted>> = {
+  frosted: glassFor.frosted,
+  dark: glassFor.dark,
+  iridescent: IridescentShimmer,
+  aurora: glassFor.aurora,
+};
+
+type WidgetSizeId = "s" | "m" | "l";
+const WIDGET_SIZES: { id: WidgetSizeId; label: string; scale: number }[] = [
+  { id: "s", label: "Small", scale: 1 },
+  { id: "m", label: "Medium", scale: 1.2 },
+  { id: "l", label: "Large", scale: 1.4 },
+];
+
+const actionMeta = {
+  working: { label: "Working", Icon: Bot, ring: "#8fb4ff", fill: "rgba(143,180,255,0.22)", phrase: "is working", status: "working" },
+  complete: { label: "Complete", Icon: CheckCircle2, ring: "#22c55e", fill: "rgba(34,197,94,0.22)", phrase: "completed", status: "done" },
+  error: { label: "Error", Icon: XCircle, ring: "#f97066", fill: "rgba(249,112,102,0.22)", phrase: "hit an error", status: "error" },
+  needs: { label: "Needs you", Icon: BellRing, ring: "#fbbf24", fill: "rgba(251,191,36,0.22)", phrase: "needs you", status: "needs" },
+} as const;
+type ActionKind = keyof typeof actionMeta;
+
+function BusyBackdrop() {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const paint = () => {
+      const w = window.innerWidth, h = window.innerHeight, dpr = Math.min(2, devicePixelRatio || 1);
+      const src = drawBackdrop("busy", w, h, dpr);
+      canvas.width = src.width;
+      canvas.height = src.height;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      canvas.getContext("2d")!.drawImage(src, 0, 0);
+    };
+    paint();
+    window.addEventListener("resize", paint);
+    return () => window.removeEventListener("resize", paint);
+  }, []);
+  return <canvas ref={ref} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />;
+}
+
+function StatusButton({ kind, active, flashed, reduce, onClick }: { kind: ActionKind; active: boolean; flashed: boolean; reduce: boolean; onClick: () => void }) {
+  const { label, Icon, ring, fill } = actionMeta[kind];
+  const lit = active || flashed;
+  return (
+    <motion.button
+      type="button"
+      data-status-action={kind}
+      aria-pressed={active}
+      onClick={onClick}
+      whileTap={reduce ? undefined : { scale: 0.96 }}
+      animate={reduce ? { scale: 1 } : flashed ? { scale: [1, 0.96, 1] } : { scale: 1 }}
+      transition={reduce ? { duration: 0 } : { duration: 0.2, ease: "easeOut" }}
+      className={clsx(
+        "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-semibold",
+        lit ? "border-transparent text-white" : "border-white/15 text-white/80 hover:bg-white/10",
+      )}
+      style={lit ? { background: fill, boxShadow: `inset 0 0 0 1px ${ring}, 0 0 0 1px ${ring}66` } : undefined}
+    >
+      <Icon className="size-3.5" aria-hidden />{label}
+    </motion.button>
+  );
+}
+
 function Demo() {
   const q = useSearchParams();
   const system = useReducedMotion() ?? false;
   const [forced, setForced] = useState(q.get("rm") === "1");
   const reduce = forced || system;
-  const sim = useSimulation(scenes[q.get("scene") ?? ""]);
+  const sim = useSimulation({ playing: false, ...(scenes[q.get("scene") ?? ""] ?? {}) });
   const anim = useAnimSettings();
-  const [showSummary, setShowSummary] = useState(true);
-  useEffect(() => { if (localStorage.getItem("agent-presence.summary") === "0") setShowSummary(false); }, []);
-  const toggleSummary = (on: boolean) => { setShowSummary(on); localStorage.setItem("agent-presence.summary", on ? "1" : "0"); };
+  const [bg, setBg] = useState<DemoBg>("abstract");
+  const [botStyle, setBotStyle] = useState<BotStyleId>("default");
+  const [widgetSize, setWidgetSize] = useState<WidgetSizeId>("s");
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [flare, setFlare] = useState(false);
+  const [focus, setFocus] = useState<{ kind: ActionKind; agentId: string } | null>(null);
+  const [flash, setFlash] = useState<ActionKind | null>(null);
+  const [lineKey, setLineKey] = useState(0);
+  const flashTimer = useRef<number | null>(null);
+  const lineTimer = useRef<number | null>(null);
+  const lineGen = useRef(0);
+  const lastStatusSlot = useRef<{ agent: Agent; kind: ActionKind; key: number } | null>(null);
   const { s } = sim;
-  const counts = s.agents.reduce((m, a) => (m[a.status]++, m), { idle: 0, working: 0, needs: 0, done: 0, error: 0 } as Record<string, number>);
-  const summary = [counts.working && `${counts.working} working`, counts.needs && `${counts.needs} needs you`, counts.error && `${counts.error} error`].filter(Boolean).join(" · ") || "All quiet";
+  const agentsRef = useRef(s.agents);
+  agentsRef.current = s.agents;
+  useEffect(() => {
+    const savedBg = localStorage.getItem("agent-presence.bg");
+    if (savedBg === "abstract" || savedBg === "busy" || savedBg === "campfire") setBg(savedBg);
+    const savedStyle = localStorage.getItem("agent-presence.botStyle");
+    const styleId = savedStyle === "iridescent-shimmer" ? "iridescent" : savedStyle;
+    if (styleId && BOT_STYLES.some(s => s.id === styleId)) setBotStyle(styleId as BotStyleId);
+    const savedSize = localStorage.getItem("agent-presence.widgetSize");
+    if (savedSize === "s" || savedSize === "m" || savedSize === "l") setWidgetSize(savedSize);
+  }, []);
+  useEffect(() => () => {
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    if (lineTimer.current) window.clearTimeout(lineTimer.current);
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || !e.altKey || e.metaKey || e.repeat) return;
+      const map: Record<string, BotStyleId> = { "1": "frosted", "2": "dark", "3": "iridescent", "4": "aurora" };
+      const id = map[e.key];
+      if (!id) return;
+      e.preventDefault();
+      setBotStyle(id);
+      localStorage.setItem("agent-presence.botStyle", id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const chooseBg = (id: DemoBg) => { setBg(id); localStorage.setItem("agent-presence.bg", id); };
+  const chooseStyle = (id: BotStyleId) => { setBotStyle(id); localStorage.setItem("agent-presence.botStyle", id); };
+  const chooseSize = (id: WidgetSizeId) => { setWidgetSize(id); localStorage.setItem("agent-presence.widgetSize", id); };
   const actions = {
     approve: (a: Agent) => sim.setStatus(a.id, "working", { verb: a.activity.verb.replace(/^Deploy$/, "Deploying").replace(/^Send$/, "Sending"), target: a.activity.target }, `Approved. ${a.name} is continuing`),
     decline: (a: Agent) => sim.setStatus(a.id, "idle", undefined, `Declined. ${a.name} stopped: ${a.activity.target}`),
     retry: (a: Agent) => sim.setStatus(a.id, "working", { verb: "Retrying", target: a.activity.target }),
   };
   const [note, setNote] = useState("");
+  const focusedAgent = focus ? s.agents.find(a => a.id === focus.agentId) : undefined;
+  const statusSlot = focusedAgent && focus ? { agent: focusedAgent, kind: focus.kind, key: lineKey } : null;
+  if (statusSlot) lastStatusSlot.current = statusSlot;
+  const slot = statusSlot ?? lastStatusSlot.current;
+  const doneCount = s.agents.filter(a => a.status === "done").length;
+  useEffect(() => { if (!doneCount) return; setFlare(true); const t = window.setTimeout(() => setFlare(false), 1400); return () => window.clearTimeout(t); }, [doneCount]);
+  const idleAll = () => { for (const a of agentsRef.current) if (a.status !== "idle") sim.setStatus(a.id, "idle"); };
+  const idleOthers = (keepId: string) => {
+    for (const a of agentsRef.current) if (a.id !== keepId && a.status !== "idle") sim.setStatus(a.id, "idle");
+  };
+  const stopLineTimer = () => {
+    if (lineTimer.current) { window.clearTimeout(lineTimer.current); lineTimer.current = null; }
+  };
+  const startLineTimer = () => {
+    stopLineTimer();
+    const gen = ++lineGen.current;
+    setLineKey(k => k + 1);
+    lineTimer.current = window.setTimeout(() => {
+      if (lineGen.current !== gen) return;
+      setFocus(null);
+      setFlash(null);
+      lineTimer.current = null;
+      idleAll();
+    }, 5000);
+  };
+  const onAction = (kind: ActionKind) => {
+    const agent = sim.trigger(kind);
+    if (!agent) return;
+    // Replace any previous status: idle the other bots, then startLineTimer
+    // cancels the old timeout and issues a new generation token so it cannot
+    // clear this one.
+    idleOthers(agent.id);
+    setFocus({ kind, agentId: agent.id });
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    setFlash(kind);
+    flashTimer.current = window.setTimeout(() => setFlash(null), reduce ? 0 : 280);
+    startLineTimer();
+  };
+  const clearStatuses = () => {
+    lineGen.current += 1;
+    stopLineTimer();
+    setFocus(null);
+    setFlash(null);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    idleAll();
+  };
+  const widgetScale = WIDGET_SIZES.find(sz => sz.id === widgetSize)!.scale;
+  const styleCfg = botStyle === "default" ? null
+    : botStyle === "iridescent" ? {}
+    : { ...defaults[botStyle], ...(preset.styles as Record<StyleId, object>)[botStyle] };
+  const Glass = botStyle === "default" ? null : DEMO_GLASS[botStyle];
+  const mainStyle = bg === "abstract"
+    ? { background: WALLPAPER }
+    : bg === "campfire"
+      ? { backgroundColor: "#0b1a24", backgroundImage: "url(/backgrounds/campfire.webp)", backgroundSize: "cover" as const, backgroundPosition: "center center" }
+      : { backgroundColor: "#0c0d11" };
 
   return (
     <ReduceCtx.Provider value={reduce}>
       <AnimCtx.Provider value={anim.cfg}>
       <MotionConfig reducedMotion={reduce ? "always" : "never"}>
-        <main className="relative h-screen min-h-[560px] overflow-hidden text-white" style={{ background: WALLPAPER }}>
-          <header className="absolute bottom-6 left-6 max-w-sm">
+        <main className="relative h-screen min-h-[560px] overflow-hidden text-white" style={mainStyle} data-demo-bg={bg} data-bot-style={botStyle} data-widget-size={widgetSize}>
+          {bg === "busy" && <BusyBackdrop />}
+
+          <nav aria-label="Desktop Backgrounds" className="absolute top-6 left-1/2 z-10 -translate-x-1/2">
+            <div role="radiogroup" aria-label="Desktop Backgrounds" className="flex rounded-xl border border-white/10 bg-[#141418]/85 p-1 shadow-lg backdrop-blur">
+              {BACKGROUNDS.map(({ id, label }) => (
+                <button key={id} type="button" role="radio" aria-checked={bg === id} data-bg-option={id} onClick={() => chooseBg(id)}
+                  className={clsx("rounded-lg px-3 py-1.5 text-xs font-semibold", bg === id ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white")}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </nav>
+
+          <header className="absolute bottom-6 left-6 z-10 max-w-sm">
             <h1 className="text-lg font-semibold text-white">Agent Presence · overlay</h1>
             <p className="mt-1 text-sm text-white/75">A floating, near-invisible overlay for your agents. Drag it anywhere, hover for controls, hide it when you want a clean desktop. Hover or Tab to a bot for its activity; click for details.</p>
             <p className="mt-2 text-xs text-white/55"><a href="/lab/" className="underline underline-offset-2 hover:text-white">Style Lab</a><span aria-hidden="true"> · </span><a href="/desktop/" className="underline underline-offset-2 hover:text-white">Desktop shell</a></p>
-            {showSummary && <p className="mt-1 text-xs text-white/60" aria-hidden="true">{summary}</p>}
           </header>
 
           {/* Director controls — demo only, not part of the widget */}
-          <section aria-label="Demo controls" className="absolute top-6 right-6 max-h-[calc(100vh-3rem)] w-64 overflow-y-auto rounded-xl border border-white/10 bg-[#141418]/85 p-3 shadow-lg backdrop-blur">
-            <h2 className="mb-2 text-xs font-semibold tracking-wide text-white/65 uppercase">Demo controls</h2>
-            <div className="flex items-center gap-2">
-              <button onClick={() => sim.play(!s.playing)} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-sm font-semibold text-white hover:bg-white/10">
-                {s.playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}{s.playing ? "Pause" : "Play"}
+          <section aria-label="Demo controls" className="absolute top-6 right-6 z-10 max-h-[calc(100vh-3rem)] w-72 overflow-y-auto rounded-xl border border-white/10 bg-[#141418]/85 p-4 shadow-lg backdrop-blur">
+            <h2 className="text-xs font-semibold tracking-wide text-white/65 uppercase">Demo controls</h2>
+            <button onClick={() => sim.play(!s.playing)} className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-sm font-semibold text-white hover:bg-white/10">
+              {s.playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}{s.playing ? "Pause" : "Play"}
+            </button>
+            <div className="mt-3">
+              <div className="grid grid-cols-2 gap-2">
+                {anim.cfg.handoff.enabled && (
+                  <button onClick={() => sim.trigger("handoff")} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10">
+                    <ArrowRightLeft className="size-3.5" aria-hidden />Handoff
+                  </button>
+                )}
+                {(["working", "complete", "error", "needs"] as const).map(k => (
+                  <StatusButton key={k} kind={k} active={focus?.kind === k} flashed={flash === k} reduce={reduce} onClick={() => onAction(k)} />
+                ))}
+              </div>
+              <div className="mt-3 h-[28px] overflow-hidden" data-status-slot>
+                <div
+                  data-action-target={statusSlot ? `${statusSlot.agent.id}:${statusSlot.kind}` : undefined}
+                  className="h-full"
+                  style={{ opacity: statusSlot ? 1 : 0, transition: reduce ? "none" : "opacity 200ms ease" }}
+                  aria-hidden={!statusSlot}
+                >
+                  {slot && (
+                    <>
+                      <p className="flex items-center gap-1.5 text-xs text-white/80">
+                        <AgentAvatar agent={slot.agent} size={16} />
+                        <span><span className="font-semibold text-white">{slot.agent.name}</span> {actionMeta[slot.kind].phrase}</span>
+                      </p>
+                      <div className="mt-2 h-[2px] overflow-hidden rounded-full bg-white/10" aria-hidden="true" data-status-progress>
+                        <motion.div
+                          key={slot.key}
+                          className="h-full origin-left rounded-full"
+                          style={{ background: slot.agent.hue }}
+                          initial={reduce ? false : { scaleX: 0 }}
+                          animate={{ scaleX: reduce ? 0 : 1 }}
+                          transition={reduce ? { duration: 0 } : { duration: 5, ease: "linear" }}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+              <button type="button" data-clear-statuses onClick={clearStatuses} className="mt-3 text-xs text-white/55 hover:text-white">
+                Clear statuses
               </button>
-              <div role="radiogroup" aria-label="Speed" className="flex rounded-lg border border-white/15 p-0.5">
-                {[0.5, 1, 2].map(v => <button key={v} role="radio" aria-checked={s.speed === v} onClick={() => sim.speed(v)}
-                  className={clsx("rounded-md px-2 py-1 text-xs font-semibold", s.speed === v ? "bg-white/15 text-white" : "text-white/70")}>{v}×</button>)}
+            </div>
+            <div className="mt-6 border-t border-white/10 pt-6">
+              <h3 className="text-xs font-semibold tracking-wide text-white/65 uppercase">Appearance</h3>
+              <h4 className="mt-3 text-[10px] font-semibold tracking-wide text-white/65 uppercase" id="bot-style-label">Bot style</h4>
+              <div role="radiogroup" aria-labelledby="bot-style-label" className="mt-2 grid grid-cols-2 gap-2">
+                {BOT_STYLES.map(({ id, label }) => (
+                  <button key={id} type="button" role="radio" aria-checked={botStyle === id} data-style-option={id} onClick={() => chooseStyle(id)}
+                    className={clsx("rounded-lg border px-2 py-1.5 text-xs font-semibold", botStyle === id ? "border-transparent bg-white/15 text-white" : "border-white/15 text-white/80 hover:bg-white/10")}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <h4 className="mt-3 text-[10px] font-semibold tracking-wide text-white/65 uppercase" id="widget-size-label">Widget size</h4>
+              <div role="radiogroup" aria-labelledby="widget-size-label" className="mt-2 flex rounded-lg border border-white/15 p-0.5">
+                {WIDGET_SIZES.map(({ id, label }) => (
+                  <button key={id} type="button" role="radio" aria-checked={widgetSize === id} data-size-option={id} onClick={() => chooseSize(id)}
+                    className={clsx("flex-1 rounded-md px-2 py-1.5 text-xs font-semibold", widgetSize === id ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white")}>
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-1.5">
-              {([["handoff", "Handoff", ArrowRightLeft], ["working", "Working", Bot], ["complete", "Complete", CheckCircle2], ["error", "Error", XCircle], ["needs", "Needs you", BellRing]] as const).filter(([k]) => k !== "handoff" || anim.cfg.handoff.enabled).map(([k, l, I]) =>
-                <button key={k} onClick={() => sim.trigger(k)} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10"><I className="size-3.5" aria-hidden />{l}</button>)}
-            </div>
-            <button onClick={resetOverlayPosition} className="mt-2 inline-flex items-center gap-1.5 text-xs text-white/70 hover:text-white"><LocateFixed className="size-3.5" aria-hidden /> Reset overlay position</button>
-            <label className="mt-2 flex items-center gap-2 text-xs text-white/75">
-              <input type="checkbox" checked={reduce} disabled={system} onChange={e => setForced(e.target.checked)} />
-              <Accessibility className="size-3.5" aria-hidden /> Reduced motion{system ? " (system)" : ""}
-            </label>
-            <label className="mt-1.5 flex items-center gap-2 text-xs text-white/75">
-              <input type="checkbox" checked={showSummary} onChange={e => toggleSummary(e.target.checked)} />
-              <Text className="size-3.5" aria-hidden /> Status summary text
-            </label>
             <AnimationControls {...anim} />
+            <div className="mt-6 border-t border-white/10 pt-6">
+              <button type="button" aria-expanded={otherOpen} aria-controls="demo-other-options" data-other-toggle
+                onClick={() => setOtherOpen(o => !o)}
+                className="flex w-full items-center gap-2 text-xs font-semibold text-white/70 hover:text-white">
+                <ChevronRight className={clsx("size-3.5 shrink-0 transition-transform", otherOpen && "rotate-90")} aria-hidden />
+                Other
+              </button>
+              {otherOpen && (
+                <div id="demo-other-options" className="mt-3 space-y-3">
+                  <button onClick={resetOverlayPosition} className="inline-flex items-center gap-2 text-xs text-white/70 hover:text-white"><LocateFixed className="size-3.5" aria-hidden /> Reset overlay position</button>
+                  <label className="flex items-center gap-2 text-xs text-white/75">
+                    <input type="checkbox" checked={reduce} disabled={system} onChange={e => setForced(e.target.checked)} />
+                    <Accessibility className="size-3.5" aria-hidden /> Reduced motion{system ? " (system)" : ""}
+                  </label>
+                </div>
+              )}
+            </div>
           </section>
 
           <p role="status" aria-live="polite" className="sr-only">{s.announce}</p>
           <p role="status" aria-live="polite" data-overlay-status className="sr-only">{note}</p>
 
-          <FloatingOverlay agents={s.agents} onAnnounce={setNote}>
+          <FloatingOverlay agents={s.agents} onAnnounce={setNote} scale={widgetScale}
+            glass={Glass && styleCfg ? (open) => <Glass cfg={styleCfg} open={open} reduce={reduce} agents={s.agents} flare={flare} src={null} /> : undefined}>
             <PresenceWidget agents={s.agents} messages={s.messages} onMsgDone={sim.msgDone} actions={actions} />
           </FloatingOverlay>
         </main>

@@ -44,3 +44,6 @@ desktop-native-*.png
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Box-only style mockups and previews
+mockups/

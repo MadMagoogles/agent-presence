@@ -32,6 +32,7 @@ function Dark({ cfg, open }: GlassProps) {
   </div>;
 }
 
+/** Reference iridescent stroke (spinning conic ring). Left unchanged; Shimmer and Foil use their own strokes. */
 function Iridescent({ cfg, open, reduce, flare }: GlassProps) {
   const only = !!cfg.onlyComplete, speed = n(cfg.speed);
   const op = only ? (flare ? 1 : 0) : Math.min(1, n(cfg.intensity) * (flare ? 1.35 : open ? 1 : 0.75));
@@ -164,6 +165,37 @@ function Pixel({ cfg, open, src }: GlassProps) {
 function Refraction({ cfg, open, src }: GlassProps) {
   return <div aria-hidden="true" className="absolute inset-0 overflow-hidden rounded-2xl" style={{ boxShadow: open ? "0 12px 32px rgba(0,0,0,.4)" : "0 4px 14px rgba(0,0,0,.25)", transition: ease }}>
     <ShaderGlass frag={REFRACT} src={src} open={open} uniforms={{ u_strength: n(cfg.strength), u_chroma: n(cfg.chroma), u_edge: n(cfg.edge), u_dim: n(cfg.dim) }} />
+  </div>;
+}
+
+
+const DRIFT = "lab-irid-drift 16s ease-in-out infinite alternate";
+const BEAM_PULSE = "lab-irid-beam-pulse 16s linear infinite alternate";
+const GLOW_PULSE = "lab-irid-glow-pulse 16s linear infinite alternate";
+const GLOW_BLUR = "lab-irid-glow-blur 16s linear infinite alternate";
+const SHIMMER_FILL = "linear-gradient(105deg, transparent 18%, rgba(77,217,255,0.00) 28%, rgba(77,217,255,0.34) 38%, rgba(139,123,255,0.32) 46%, rgba(255,107,213,0.28) 52%, rgba(255,217,61,0.22) 60%, transparent 72%)";
+const STROKE_EDGE = "conic-gradient(#ff6b6b, #ffd93d, #6bff95, #4dd9ff, #8b7bff, #ff6bd5, #ff6b6b)";
+const STROKE_BEAM = "linear-gradient(105deg, transparent 22%, rgba(77,217,255,0) 30%, rgba(77,217,255,0.68) 38%, rgba(139,123,255,0.70) 46%, rgba(255,107,213,0.66) 52%, rgba(255,217,61,0.60) 60%, transparent 72%)";
+
+/** B — Drift shimmer fill, thin travelling beam, and 300ms corner swells from mockups/iridescent-pulse.html. */
+export function IridescentShimmer({ open, reduce }: GlassProps) {
+  const motion = reduce ? "none" : DRIFT;
+  const delay = reduce ? undefined : "-4s";
+  return <div aria-hidden="true" className="absolute inset-0 overflow-hidden rounded-2xl" style={{ transition: ease, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", backgroundColor: `rgba(12,12,16,${open ? 0.55 : 0.4})`, boxShadow: open ? "0 10px 30px rgba(0,0,0,.35)" : "none" }}>
+    <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+      <div style={{ position: "absolute", inset: "-20% -80%", background: SHIMMER_FILL, mixBlendMode: "screen", opacity: 0.95, animation: motion, animationDelay: delay }} />
+    </div>
+    <div style={{ ...ring(1), opacity: 0.4 }}>
+      <div className="absolute inset-[-50%]" style={{ background: STROKE_EDGE, filter: "saturate(1.4)" }} />
+    </div>
+    {!reduce && <>
+      <div style={{ ...ring(1), opacity: 0.7, animation: BEAM_PULSE, animationDelay: delay }}>
+        <div style={{ position: "absolute", inset: "-20% -80%", background: STROKE_BEAM, filter: "saturate(1.45)", animation: motion, animationDelay: delay }} />
+      </div>
+      <div style={{ ...ring(2.25), opacity: 0.26, animation: GLOW_PULSE, animationDelay: delay }}>
+        <div style={{ position: "absolute", inset: "-20% -80%", background: STROKE_BEAM, animation: `${motion}, ${GLOW_BLUR}`, animationDelay: "-4s, -4s" }} />
+      </div>
+    </>}
   </div>;
 }
 

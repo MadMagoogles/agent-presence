@@ -29,4 +29,20 @@ body { background: var(--color-bg-secondary); color: var(--color-text-primary); 
 @keyframes lab-drift-0 { to { transform: translate(28px, -10px) scale(1.25); } }
 @keyframes lab-drift-1 { to { transform: translate(-30px, 8px) scale(0.85); } }
 @keyframes lab-drift-2 { to { transform: translate(14px, 12px) scale(1.15); } }
+@keyframes lab-irid-drift { from { transform: translateX(-18%); } to { transform: translateX(18%); } }
+/* Corner swells locked to beam position on a 16s ease-in-out ping-pong (alternate).
+   Percentages are on a linear 16s clock, inverted through ease-in-out so peaks
+   still hit the four 16px corners. Each swell is 300ms ease-in-out. */
+@keyframes lab-irid-beam-pulse {
+  0%, 8%, 9.88%, 14.24%, 16.11%, 83.89%, 85.76%, 90.12%, 92%, 100% { opacity: 0.7; animation-timing-function: ease-in-out; }
+  8.94%, 15.18%, 84.82%, 91.06% { opacity: 0.95; animation-timing-function: ease-in-out; }
+}
+@keyframes lab-irid-glow-pulse {
+  0%, 8%, 9.88%, 14.24%, 16.11%, 83.89%, 85.76%, 90.12%, 92%, 100% { opacity: 0.26; animation-timing-function: ease-in-out; }
+  8.94%, 15.18%, 84.82%, 91.06% { opacity: 0.52; animation-timing-function: ease-in-out; }
+}
+@keyframes lab-irid-glow-blur {
+  0%, 8%, 9.88%, 14.24%, 16.11%, 83.89%, 85.76%, 90.12%, 92%, 100% { filter: saturate(1.45) blur(1.4px); animation-timing-function: ease-in-out; }
+  8.94%, 15.18%, 84.82%, 91.06% { filter: saturate(1.6) blur(2.8px); animation-timing-function: ease-in-out; }
+}
 @media (prefers-reduced-motion: reduce) { [style*="lab-"] { animation: none !important; } }
