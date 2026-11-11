@@ -97,7 +97,7 @@ await ip.screenshot({ path: "screens/hover-zoom.png", clip: { x: ib.x - 40, y: i
 await ip.close();
 await page.mouse.move(b0.x + 20, b0.y + b0.height / 2); await page.waitForTimeout(600);
 const b1 = await ov.boundingBox();
-check("hover reserves pill width and shows × hide button", Math.abs(b1.width-b0.width)<1 && await page.getByRole("button", { name: "Hide agents overlay" }).isVisible());
+check("hover expands pill and shows × hide button", b1.width>b0.width+20 && await page.getByRole("button", { name: "Hide agents overlay" }).isVisible());
 check("hover has no bottom drag handle", await page.locator('[data-overlay]').evaluate(el => ![...el.querySelectorAll('span')].some(e => e.className?.includes?.('bottom-[5px]'))));
 check("hover cursor is default on pill and bots", await page.locator('[data-overlay], [data-overlay] [data-agent]').evaluateAll(es => es.every(e => getComputedStyle(e).cursor === 'default')));
 await page.screenshot({path:'screens/hover-no-handle.png'});
@@ -197,7 +197,7 @@ await lp.goto(`${LAB}?style=aurora`); await lp.evaluate(() => localStorage.remov
   await lp.screenshot({ path: "screens/lab-aurora-clipped.png" });
   await lp.mouse.move(ob.x + 20, ob.y + ob.height / 2); await lp.waitForTimeout(700); await axe("lab-aurora-hover");
   const oh = await lp.locator("[data-overlay]").boundingBox(), ah = await lp.locator("[data-aurora]").boundingBox();
-  check("lab: aurora keeps reserved hover width", Math.abs(oh.width-ob.width)<1 && Math.abs(ah.width - oh.width) < 2);
+  check("lab: aurora hover expands pill and stays clipped", oh.width > ob.width + 20 && Math.abs(oh.x - ob.x) < 2 && Math.abs(ah.x - oh.x) < 2 && Math.abs(ah.width - oh.width) < 2);
   await lp.screenshot({ path: "screens/lab-aurora-clipped-hover.png" }); }
 await lp.goto(`${LAB}?rm=1&style=iridescent`); await lp.waitForTimeout(600); await axe("lab-reduced");
 check("lab: no WebGL/console errors", glErrors.length === 0);
@@ -334,7 +334,7 @@ renameSync(`screens/_vid/${readdirSync("screens/_vid")[0]}`, "screens/lab-tour.w
   check('desktop document root resets after drag release',await hp.evaluate(()=>document.documentElement.style.cursor!=='grabbing'));
   await hc.close(); }
 
-// Restored per-bot hover: fixed layout footprints, highlight + transform only.
+// Per-bot hover: the pill expands to reveal ×; bot layout footprints stay fixed (highlight + transform only).
 { const cc=await browser.newContext({viewport:lvp,deviceScaleFactor:3});const pp=await cc.newPage();
   await pp.goto(`${LAB}?style=dark&still=1&scale=1.5`);await pp.mouse.move(5,940);await pp.waitForTimeout(700);
   const ov=pp.locator('[data-overlay]');const bots=pp.locator('[data-overlay] [data-agent]');
@@ -342,7 +342,10 @@ renameSync(`screens/_vid/${readdirSync("screens/_vid")[0]}`, "screens/lab-tour.w
   const rest=await layout();const r=await ov.boundingBox();
   await pp.screenshot({path:'screens/bot-hover-rest.png',clip:{x:r.x-16,y:r.y-16,width:r.width+32,height:r.height+50}});
   const first=bots.first();const botBox=await first.boundingBox();await pp.mouse.move(botBox.x+botBox.width/2,botBox.y+botBox.height/2);await pp.waitForTimeout(250);
-  const hovered=await layout();check('hover does not move or resize pill or any bot container',rest.every((row,i)=>row.every((v,j)=>Math.abs(v-hovered[i][j])<.1)));
+  const hovered=await layout();
+  const pillGrew=hovered[0][2]>rest[0][2]+20 && Math.abs(hovered[0][1]-rest[0][1])<.1 && Math.abs(hovered[0][3]-rest[0][3])<.1;
+  const botsStay=rest.slice(1).every((row,i)=>row.every((v,j)=>Math.abs(v-hovered[i+1][j])<.1));
+  check('hover expands pill but bot containers stay put',pillGrew&&botsStay);
   check('bot hover highlight restored',await first.evaluate(e=>getComputedStyle(e).backgroundColor!=='rgba(0, 0, 0, 0)'));
   check('bot hover lift is transform-only',await first.locator('[data-bot-hover]').evaluate(e=>getComputedStyle(e).transform!=='none' || getComputedStyle(e).translate!=='none' || getComputedStyle(e).scale!=='none'));
   await pp.screenshot({path:'screens/bot-hover-active.png',clip:{x:r.x-16,y:r.y-16,width:r.width+32,height:r.height+50}});
